@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# setup_mac.sh - install Python dependencies for mac-screenshot.
-# Run once before first use:  bash tools/mac-screenshot/setup_mac.sh
+# setup_mac.sh - install Python dependencies for snap-it.
+# Run once before first use:  bash setup_mac.sh
 
 set -euo pipefail
 
@@ -38,7 +38,7 @@ if [ -z "$PYTHON" ]; then
   exit 1
 fi
 
-echo "==> Using Python: $PYTHON ($($PYTHON --version))"
+echo "==> Using Python: $PYTHON ($("$PYTHON" --version))"
 
 # ---------------------------------------------------------------------------
 # Create / reuse virtual environment
@@ -55,19 +55,19 @@ PIP="$VENV/bin/pip"
 echo ""
 echo "==> Installing Python packages..."
 "$PIP" install --quiet --upgrade pip
-"$PIP" install --quiet pynput
+"$PIP" install --quiet -r "$SCRIPT_DIR/requirements.txt"
 
 echo ""
 echo "==> All packages installed."
 echo ""
-echo "  IMPORTANT: mac-screenshot needs Accessibility permissions to detect"
+echo "  IMPORTANT: snap-it needs Accessibility permissions to detect"
 echo "  the global hotkey (F11) system-wide."
 echo ""
 echo "  Go to: System Settings > Privacy & Security > Accessibility"
 echo "  Add your terminal app (or the Python binary) and grant access."
 echo ""
 echo "  To start the daemon now:"
-echo "    bash $SCRIPT_DIR/restart.sh"
+echo "    bash \"$SCRIPT_DIR/restart.sh\""
 echo ""
 echo "  To install as a login item (auto-start on boot):"
-echo "    bash $SCRIPT_DIR/install-launchagent.sh"
+echo "    bash \"$SCRIPT_DIR/install-launchagent.sh\""

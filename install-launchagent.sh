@@ -1,58 +1,53 @@
 #!/usr/bin/env bash
-# install-launchagent.sh - install mac-screenshot as a login item.
-# Runs automatically on login and restarts if it crashes.
-# Usage:  bash tools/mac-screenshot/install-launchagent.sh
-
+# Install snap-it as a login item. Run: bash install-launchagent.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="$SCRIPT_DIR/.venv"
 PLIST_DIR="$HOME/Library/LaunchAgents"
-PLIST_NAME="com.mikerosoft.mac-screenshot.plist"
-PLIST_PATH="$PLIST_DIR/$PLIST_NAME"
-PYTHON="$VENV/bin/python3"
-LOG="$HOME/Library/Logs/mac-screenshot.log"
+PLIST_PATH="$PLIST_DIR/com.mikerosoft.snap-it.plist"
+LEGACY_PLIST_PATH="$PLIST_DIR/com.mikerosoft.mac-screenshot.plist"
+PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+LOG="$HOME/Library/Logs/snap-it.log"
 
-if [ ! -f "$PYTHON" ]; then
+if [ ! -x "$PYTHON" ]; then
   echo "ERROR: venv not found. Run setup first:"
-  echo "  bash $SCRIPT_DIR/setup_mac.sh"
+  echo "  bash \"$SCRIPT_DIR/setup_mac.sh\""
   exit 1
 fi
 
-mkdir -p "$PLIST_DIR"
+mkdir -p "$PLIST_DIR" "$(dirname "$LOG")"
 
-cat > "$PLIST_PATH" << PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.mikerosoft.mac-screenshot</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$PYTHON</string>
-        <string>$SCRIPT_DIR/mac-screenshot.py</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>$LOG</string>
-    <key>StandardErrorPath</key>
-    <string>$LOG</string>
-</dict>
-</plist>
-PLIST
+# Serialize paths rather than interpolating XML: clones may contain '&' or '<'.
+"$PYTHON" - "$PLIST_PATH" "$PYTHON" "$SCRIPT_DIR/snap-it.py" "$LOG" <<'PY'
+import plistlib
+import sys
 
-# Unload first in case it was already loaded
+path, python, script, log = sys.argv[1:]
+with open(path, 'wb') as file:
+    plistlib.dump({
+        'Label': 'com.mikerosoft.snap-it',
+        'ProgramArguments': [python, script],
+        'RunAtLoad': True,
+        'KeepAlive': True,
+        'StandardOutPath': log,
+        'StandardErrorPath': log,
+    }, file)
+PY
+
+# Retire the old login item so a renamed install cannot run two hotkey listeners.
+# Existing screenshots and logs stay where they are; there are no saved settings.
+if [ -f "$LEGACY_PLIST_PATH" ]; then
+  launchctl unload "$LEGACY_PLIST_PATH" 2>/dev/null || true
+  rm "$LEGACY_PLIST_PATH"
+fi
+
 launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 
-echo "Installed and started mac-screenshot as a login item."
+echo "Installed and started snap-it as a login item."
 echo ""
 echo "  Hotkey:     F11"
 echo "  Save dir:   ~/Desktop/Screenshots"
 echo "  Log:        $LOG"
 echo ""
-echo "To remove:  bash $SCRIPT_DIR/uninstall-launchagent.sh"
+echo "To remove:  bash \"$SCRIPT_DIR/uninstall-launchagent.sh\""

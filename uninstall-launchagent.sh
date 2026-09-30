@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# uninstall-launchagent.sh - remove the mac-screenshot login item.
-# Usage:  bash tools/mac-screenshot/uninstall-launchagent.sh
+# Remove only snap-it's current and legacy login items.
+# Run: bash uninstall-launchagent.sh
+set -euo pipefail
 
-PLIST_PATH="$HOME/Library/LaunchAgents/com.mikerosoft.mac-screenshot.plist"
+for label in com.mikerosoft.snap-it com.mikerosoft.mac-screenshot; do
+  plist_path="$HOME/Library/LaunchAgents/$label.plist"
+  if [ -f "$plist_path" ]; then
+    launchctl unload "$plist_path" 2>/dev/null || true
+    rm "$plist_path"
+  fi
+done
 
-if [ ! -f "$PLIST_PATH" ]; then
-  echo "LaunchAgent not installed."
-  exit 0
-fi
-
-launchctl unload "$PLIST_PATH" 2>/dev/null || true
-rm "$PLIST_PATH"
-echo "mac-screenshot login item removed."
+echo "snap-it login item removed (if installed)."

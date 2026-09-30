@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mac-screenshot: Global hotkey screenshot daemon for macOS.
+"""snap-it: Global hotkey screenshot daemon for macOS.
 
 Press F11 to:
   1. Enter selection-capture mode (crosshair cursor)
@@ -22,7 +22,7 @@ from pynput import keyboard
 
 HOTKEY = "<f11>"
 SAVE_DIR = os.path.expanduser("~/Desktop/Screenshots")
-LOG_FILE = os.path.expanduser("~/Library/Logs/mac-screenshot.log")
+LOG_FILE = os.path.expanduser("~/Library/Logs/snap-it.log")
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -79,7 +79,7 @@ def copy_to_clipboard(filepath: str) -> None:
 
 
 def notify(message: str) -> None:
-    script = f'display notification "{message}" with title "mac-screenshot"'
+    script = f'display notification "{message}" with title "snap-it"'
     subprocess.run(["osascript", "-e", script], capture_output=True)
 
 
@@ -104,7 +104,7 @@ def on_hotkey() -> None:
 
 
 def main() -> None:
-    log.info("mac-screenshot starting (hotkey: %s, save dir: %s)", HOTKEY, SAVE_DIR)
+    log.info("snap-it starting (hotkey: %s, save dir: %s)", HOTKEY, SAVE_DIR)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
     with keyboard.GlobalHotKeys({HOTKEY: on_hotkey}) as listener:
