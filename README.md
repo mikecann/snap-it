@@ -5,7 +5,9 @@ Press F11 to grab part of the screen and start marking it up
 macOS
 
 <!-- media: hero -->
-<!-- ![snap-it](docs/hero.png) -->
+![snap-it has just captured part of the screen and opened it in Preview](docs/preview.png)
+
+[Watch it run (14 seconds)](docs/demo.mp4)
 <!-- /media: hero -->
 
 ## What it is
