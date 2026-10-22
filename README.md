@@ -5,9 +5,8 @@ Press ⌘⇧4, grab part of the screen and start drawing arrows on it straight a
 macOS 14 or later
 
 <!-- media: hero -->
-![snap-it has just captured part of the screen and opened it for markup](docs/preview.png)
+![The Snap It editor with a few arrows, a box, a highlight and some text on a screenshot](docs/preview.png)
 
-[Watch it run (14 seconds)](docs/demo.mp4)
 <!-- /media: hero -->
 
 ## What it is
