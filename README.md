@@ -1,22 +1,22 @@
 # <img src="icons/snap-it.png" width="24" height="24" alt=""> snap-it
 
-Press F11 to grab part of the screen and start marking it up
+Press ⌘⇧4, grab part of the screen and start drawing arrows on it straight away
 
-macOS
+macOS 14 or later
 
 <!-- media: hero -->
-![snap-it has just captured part of the screen and opened it in Preview](docs/preview.png)
+![snap-it has just captured part of the screen and opened it for markup](docs/preview.png)
 
 [Watch it run (14 seconds)](docs/demo.mp4)
 <!-- /media: hero -->
 
 ## What it is
 
-A little background helper for macOS. You press F11, drag out the bit of the screen you want, and it saves it to `~/Desktop/Screenshots` with a timestamp name, copies it to the clipboard and opens it in Preview so you can scribble on it straight away.
+My own little replacement for CleanShot X. I was using CleanShot for basically one thing: grab a bit of the screen, slap a pink arrow on it and paste it into a chat. So I made a tool that does just that, and does it fast.
 
-It starts on login, so once it's set up you can mostly forget about it.
+It lives in the menu bar. Press ⌘⇧4, drag out an area and an editor pops up with the arrow tool ready to go. The screenshot is already saved to `~/Screenshots` and on your clipboard, so if you don't want to draw anything you can just paste it.
 
-Previously called `mac-screenshot`.
+It's a native Swift app now. The old version was a Python script that opened Preview, which got the job done but wasn't much fun to mark things up in.
 
 ![snap-it banner](docs/header.webp)
 
@@ -32,81 +32,88 @@ Paste this into your AI coding agent (Claude Code, Codex, Cursor...):
 
 ### Or set it up by hand
 
-You'll need macOS, Git and Python 3.10 or newer with `venv` and `pip`. The setup script looks for Homebrew Python or `python3` on PATH. If you need Python, install it with `brew install python@3.12`.
+You'll need macOS 14 or later, Git, and Xcode or the Command Line Tools with Swift 6 or later. Run `xcode-select --install` first if you need them.
 
 ```bash
 git clone https://github.com/mikecann/snap-it.git
 cd snap-it
-bash install.sh
+bash restart.sh
 ```
 
-This creates `.venv`, installs `pynput`, and starts a LaunchAgent that runs again when you log in. Keep the clone where you want it to live. If you move it, rerun `bash install-launchagent.sh` from its new location.
+That builds it, installs `~/Applications/Snap It.app`, and opens it. It turns on Open at Login the first time it runs. It signs with your first Apple Development identity if you have one (ad-hoc otherwise), so the Screen Recording permission sticks around between rebuilds.
 
-Then grant permissions in macOS:
+The first time you take a screenshot macOS will ask for **Screen Recording** permission. Turn on Snap It in **System Settings > Privacy & Security > Screen & System Audio Recording**, then try again. No Accessibility permission is needed.
 
-1. Open **System Settings > Privacy & Security > Accessibility**.
-2. Add the Python interpreter used by `.venv/bin/python3` (or Python.app if macOS lists it) and enable it. For a manually started daemon, allow the terminal app too if prompted.
-3. Allow **Screen Recording** if macOS asks.
-4. Run `bash restart.sh`, then press F11.
+If you were using the old Python version, `restart.sh` stops it and removes its login item for you. If CleanShot X or the built-in macOS shortcuts are still using ⌘⇧3, ⌘⇧4 or ⌘⇧5, turn those off first or Snap It won't get them (the log says if a hotkey couldn't be registered).
 
-No API keys or `.env` file are needed.
+`bash uninstall.sh` removes the app and its login item. Your screenshots and the log stay put.
 
 ## Using it
 
-Press F11 and drag out a region. The saved PNG is copied to your clipboard and opened in Preview for markup. Press Escape during selection to cancel.
+- **⌘⇧4** (or **⌘⇧5**): drag out an area. The screen freezes while you pick, with a magnifier for lining things up. Hold Shift for a square. Escape or right-click cancels.
+- **⌘⇧3**: the whole screen your mouse is on.
 
-Files are named like `Screenshot 2026-09-30 at 10.42.05 - Safari.png`, using the frontmost app's name when it is available.
+Every capture plays the screenshot sound, saves a PNG like `Screenshot 2026-10-22 at 12.47.51 PM@2x.png`, copies it to the clipboard and opens the editor.
 
-```bash
-# Set up dependencies without installing a login item
-bash setup_mac.sh
+You can also open an existing image in the editor with `open -a "Snap It" some.png`, by dropping it on the app icon, or with Finder's Open With. A PNG gets saved over in place, anything else (JPEG, HEIC, WebP, TIFF) saves as a PNG next to it so the original is left alone.
 
-# Install or update the login item
-bash install-launchagent.sh
+For Raycast or scripts, `open snapit://capture-area` and `open snapit://capture-fullscreen` do the same as ⌘⇧4 and ⌘⇧3.
 
-# Restart after code changes, or start manually without a login item
-bash restart.sh
+In the editor:
 
-# Stop a manually started daemon
-bash kill.sh
+| Key | Tool |
+|---|---|
+| A | Arrow (Shift snaps to 45°) |
+| R | Rectangle (Shift for a square) |
+| F | Filled rectangle, handy for hiding things |
+| O | Ellipse (Shift for a circle) |
+| L | Line (Shift snaps to 45°) |
+| T | Text, click to type. Double-click text to edit it again |
+| P | Pen |
+| H | Highlighter (Shift for a straight line) |
+| X | Pixelate |
+| C | Crop, then Return to apply or Escape to cancel |
 
-# Remove the login item and stop its managed daemon
-bash uninstall-launchagent.sh
-```
+Click on anything you've drawn to select it, then drag it around, drag its handles, change its colour or size, or hit Delete. Arrow keys nudge it. ⌘Z and ⌘⇧Z undo and redo.
 
-The installer replaces the previous login item if it finds one. It leaves existing screenshots and logs alone. Uninstalling keeps your clone, `.venv`, screenshots and logs.
+**Done** (Return or ⌘Return) saves over the PNG, copies it and closes. **Copy** (⌘C) and **Save** (⌘S) keep the window open. The little picture button can be dragged straight into Claude, Slack or Finder. If you close the window with ⌘W or Escape after drawing something, or quit the app, it saves and copies anyway, so you never lose an arrow. If the save fails (disk full, folder gone) the image goes on the clipboard and the window stays open.
 
 ## Settings
 
-Edit the constants at the top of `snap-it.py`, then run `bash restart.sh`:
+There's no settings window. It remembers your last tool, colour, thickness and text size. The default is a hot pink arrow at 7 pt, because that's what I use for everything.
 
-- `HOTKEY` defaults to `<f11>`.
-- `SAVE_DIR` defaults to `~/Desktop/Screenshots`.
-- `LOG_FILE` defaults to `~/Library/Logs/snap-it.log`.
+To save somewhere else:
 
-Settings live in the source file. If you customised an earlier clone, copy those values into this one before installing.
+```bash
+defaults write com.mikerosoft.snap-it saveFolder ~/Desktop/Screenshots
+```
+
+Then quit and reopen it from the menu bar.
 
 ## Troubleshooting
 
-Check the log after restarting:
+Check the log:
 
 ```bash
 tail -f ~/Library/Logs/snap-it.log
 ```
 
-If F11 does nothing, check Accessibility permissions and any macOS keyboard shortcut using that key. Depending on your keyboard's function-key setting, you may need Fn + F11.
+It says whether each hotkey registered, and how long each capture took.
 
-The login item lives at `~/Library/LaunchAgents/com.mikerosoft.snap-it.plist`. It restarts the daemon if it exits, so use `uninstall-launchagent.sh` to stop an installed daemon. `kill.sh` is for manual background runs.
+If nothing happens when you press ⌘⇧4, something else probably has the shortcut. Quit CleanShot X, check **System Settings > Keyboard > Keyboard Shortcuts > Screenshots**, then run `bash restart.sh`.
+
+If you get a black or empty capture, or the permission alert keeps coming back, remove Snap It from the Screen Recording list, add it again and reopen it.
 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v
-python3 -m compileall -q snap-it.py tests
-for script in *.sh; do bash -n "$script"; done
+swift build
+swift test
+bash -n restart.sh uninstall.sh
+bash restart.sh
 ```
 
-The tests use temporary homes and stub native commands, so they don't install a real login item or require screen permissions. After changing the daemon, run `bash restart.sh` on a Mac with permission and check F11 capture, clipboard paste, Preview and the log.
+The tests cover the geometry, file names, shapes, undo/redo, crop and the rendered pixels, so they don't need any screen permissions. After changing the app, run `bash restart.sh` and try a real capture.
 
 ## Art
 
