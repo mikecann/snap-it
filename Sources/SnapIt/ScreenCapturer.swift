@@ -118,7 +118,9 @@ final class ScreenCapturer {
         let scale = CGFloat(filter.pointPixelScale)
         config.width = Int((filter.contentRect.width * scale).rounded())
         config.height = Int((filter.contentRect.height * scale).rounded())
-        config.showsCursor = false
+        // Mike wants the pointer in his shots. It's baked in where it was when the hotkey fired,
+        // so area captures show it frozen under the live crosshair, the same as CleanShot did.
+        config.showsCursor = true
         config.captureResolution = .best
         return config
     }
