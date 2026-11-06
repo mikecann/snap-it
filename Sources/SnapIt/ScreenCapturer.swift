@@ -28,11 +28,14 @@ final class ScreenCapturer {
     private var cached: SCShareableContent?
     private var refreshing: Task<SCShareableContent, Error>?
     private var refreshAgain = false
+    /// Bumped on every screen change, so a fetch that started before the change can't put its stale list back in the cache.
+    private var generation = 0
 
     init() {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 Log.info("Screen parameters changed; refreshing the display list")
+                self?.generation += 1
                 self?.cached = nil
                 self?.refresh()
             }
@@ -49,9 +52,10 @@ final class ScreenCapturer {
         }
         let task = Task { try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) }
         refreshing = task
+        let startedAt = generation
         Task {
             let result = try? await task.value
-            if let result { self.cached = result }
+            if let result, startedAt == self.generation { self.cached = result }
             self.refreshing = nil
             if self.refreshAgain {
                 self.refreshAgain = false
@@ -63,11 +67,33 @@ final class ScreenCapturer {
     private func content() async throws -> SCShareableContent {
         if let cached { return cached }
         if let refreshing { return try await refreshing.value }
+        return try await fetch()
+    }
+
+    /// Fetches in the foreground. Only caches the result if no screen change happened while it was in
+    /// flight, so it can't overwrite a newer list that a background refresh stored meanwhile.
+    private func fetch() async throws -> SCShareableContent {
+        let startedAt = generation
         let start = CACurrentMediaTime()
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         Log.info("Fetched shareable content in \(Log.ms(since: start))")
-        cached = content
+        if startedAt == generation { cached = content }
         return content
+    }
+
+    /// The display list, checked against the screens AppKit sees right now. On 6 Nov, plugging displays
+    /// in and out left a list from partway through the change in the cache, and every capture failed
+    /// with noDisplay until the app was relaunched. So when the list doesn't cover every screen, fetch it
+    /// fresh once before giving up.
+    private func currentContent() async throws -> SCShareableContent {
+        let content = try await content()
+        let ids = Set(content.displays.map(\.displayID))
+        if NSScreen.screens.allSatisfy({ $0.displayID.map(ids.contains) ?? false }) { return content }
+        Log.info("Display list doesn't match the screens; fetching it again")
+        // Retire any background refresh that started before this point, then fetch fresh.
+        generation += 1
+        cached = nil
+        return try await fetch()
     }
 
     /// Finder's desktop-icon windows. Everything else stays, including open editors, so the frozen frame
@@ -79,7 +105,7 @@ final class ScreenCapturer {
     }
 
     func captureAllDisplays() async throws -> [DisplayCapture] {
-        let content = try await content()
+        let content = try await currentContent()
         let excluded = excludedWindows(in: content)
         let screens = NSScreen.screens
         let pairs: [(SCDisplay, NSScreen)] = content.displays.compactMap { display in
@@ -104,7 +130,7 @@ final class ScreenCapturer {
     }
 
     func captureDisplay(containing point: CGPoint) async throws -> DisplayCapture {
-        let content = try await content()
+        let content = try await currentContent()
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) ?? NSScreen.main,
               let display = content.displays.first(where: { $0.displayID == screen.displayID }) else { throw CaptureError.noDisplay }
         defer { refresh() }
