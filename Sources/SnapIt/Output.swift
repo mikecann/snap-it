@@ -52,6 +52,21 @@ enum Output {
         }
     }
 
+    /// The video as a file, for Finder and apps that take files, plus text saying where the video and its summary are,
+    /// for pasting into an agent. Most agents can't watch video, but they can read summary.md and the frames it lists.
+    @MainActor
+    static func copyRecording(_ recording: FinishedRecording) {
+        let item = NSPasteboardItem()
+        item.setString(recording.videoURL.absoluteString, forType: .fileURL)
+        item.setString("""
+            Screen recording (\(String(format: "%.1f", recording.duration)) s): \(recording.videoURL.path)
+            What I clicked and typed, with frames from the video: \(recording.summaryURL.path)
+            """, forType: .string)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
+    }
+
     /// PNG data plus the file URL, so pasting works in chat apps, Slack and Finder alike.
     static func copyToClipboard(png: Data, fileURL: URL?) {
         let item = NSPasteboardItem()

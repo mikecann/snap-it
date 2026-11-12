@@ -39,6 +39,17 @@ public struct SnapItSettings {
         nonmutating set { defaults.set(Double(newValue), forKey: "thickness") }
     }
 
+    /// Recordings show clicks and keys by default: they're mostly for showing an agent what you did.
+    public var showClicks: Bool {
+        get { defaults.object(forKey: "showClicks") as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: "showClicks") }
+    }
+
+    public var showKeys: Bool {
+        get { defaults.object(forKey: "showKeys") as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: "showKeys") }
+    }
+
     public var textSize: CGFloat {
         get { defaults.object(forKey: "textSize") as? Double ?? 35 }
         nonmutating set { defaults.set(Double(newValue), forKey: "textSize") }
