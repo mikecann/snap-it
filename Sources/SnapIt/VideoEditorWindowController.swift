@@ -222,7 +222,7 @@ final class VideoEditorWindowController: NSWindowController, NSWindowDelegate {
                                                        clicksRecorded: original.clicksRecorded, keysRecorded: original.keysRecorded,
                                                        screen: original.screen)
                     self.load()
-                    Log.info(String(format: "Trimmed %@ to %.1f–%.1f s in %@", original.videoURL.lastPathComponent, start, end, Log.ms(since: began)))
+                    Log.info(String(format: "Trimmed %@ to %.1f to %.1f s in %@", original.videoURL.lastPathComponent, start, end, Log.ms(since: began)))
                     let trimmed = self.recording
                     Task {
                         await RecordingNotes.write(for: trimmed)
