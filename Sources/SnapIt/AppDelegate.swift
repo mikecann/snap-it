@@ -10,6 +10,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var loginMenuItem: NSMenuItem?
     private var editors: [EditorWindowController] = []
+    private var videoEditors: [VideoEditorWindowController] = []
+    private var statusMenu: NSMenu?
+    private var clicksMenuItem: NSMenuItem?
+    private var keysMenuItem: NSMenuItem?
+    /// The recording in progress. While it runs, every Snap It hotkey and the menu bar icon stop it.
+    private var recording: RecordingSession?
+    /// Between letting go of the crosshair and the recording starting, and between stopping and the editor opening.
+    private var recordingBusy = false
     private var overlay: OverlayController?
     private var capturing = false
     private var reservedPaths: Set<String> = []
@@ -52,6 +60,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// AppKit doesn't ask windows before quitting, so commit every editor with unsaved changes here, synchronously.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Finish the video first, so quitting mid-recording still leaves a file that plays.
+        if let session = recording {
+            recording = nil
+            Task {
+                _ = try? await session.stop()
+                Log.info("Finished the recording before quitting")
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            commitEditors()
+            return .terminateLater
+        }
+        commitEditors()
+        Log.info("Quitting")
+        return .terminateNow
+    }
+
+    private func commitEditors() {
         var lastCopy: (data: Data, url: URL?)?
         for editor in editors {
             guard let result = editor.commitNow() else { continue }
@@ -61,8 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let lastCopy { Output.copyToClipboard(png: lastCopy.data, fileURL: lastCopy.url) }
         // Let queued capture writes land too.
         Output.io.sync {}
-        Log.info("Quitting")
-        return .terminateNow
     }
 
     // MARK: Opening files and URLs
@@ -93,7 +116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch command {
         case "capture-area": captureArea(trigger: "url")
         case "capture-fullscreen": captureFullScreen(trigger: "url")
-        default: Log.info("Unknown URL \(url.absoluteString); expected snapit://capture-area or snapit://capture-fullscreen")
+        case "record-area": captureArea(trigger: "url", mode: .record)
+        case "stop-recording": stopRecording(trigger: "url")
+        default: Log.info("Unknown URL \(url.absoluteString); expected snapit://capture-area, capture-fullscreen, record-area or stop-recording")
         }
     }
 
@@ -125,19 +150,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         area.keyEquivalentModifierMask = [.command, .shift]
         let full = NSMenuItem(title: "Capture Full Screen", action: #selector(captureFullScreenFromMenu), keyEquivalent: "3")
         full.keyEquivalentModifierMask = [.command, .shift]
+        let record = NSMenuItem(title: "Record Area (⌘⇧4 twice)", action: #selector(recordAreaFromMenu), keyEquivalent: "")
+        let clicks = NSMenuItem(title: "Show Clicks in Recordings", action: #selector(toggleShowClicks), keyEquivalent: "")
+        let keys = NSMenuItem(title: "Show Keys in Recordings", action: #selector(toggleShowKeys), keyEquivalent: "")
         let folder = NSMenuItem(title: "Open Screenshots Folder", action: #selector(openFolder), keyEquivalent: "")
         let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         let quit = NSMenuItem(title: "Quit Snap It", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        for menuItem in [area, full, folder, login] { menuItem.target = self }
-        menu.items = [area, full, .separator(), folder, login, .separator(), quit]
+        for menuItem in [area, full, record, clicks, keys, folder, login] { menuItem.target = self }
+        menu.items = [area, full, .separator(), record, clicks, keys, .separator(), folder, login, .separator(), quit]
         item.menu = menu
+        statusMenu = menu
         loginMenuItem = login
+        clicksMenuItem = clicks
+        keysMenuItem = keys
         statusItem = item
     }
 
     func menuWillOpen(_ menu: NSMenu) {
         loginMenuItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        clicksMenuItem?.state = settings.showClicks ? .on : .off
+        keysMenuItem?.state = settings.showKeys ? .on : .off
+        keysMenuItem?.title = settings.showKeys && !CGPreflightListenEventAccess()
+            ? "Show Keys in Recordings (needs Input Monitoring)" : "Show Keys in Recordings"
     }
+
+    @objc private func recordAreaFromMenu() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.captureArea(trigger: "menu", mode: .record) }
+    }
+
+    @objc private func toggleShowClicks() {
+        settings.showClicks.toggle()
+        Log.info("Show clicks in recordings: \(settings.showClicks ? "on" : "off")")
+    }
+
+    /// Turning keys on, or picking it while it still needs permission, asks for Input Monitoring.
+    @objc private func toggleShowKeys() {
+        if settings.showKeys, !CGPreflightListenEventAccess() {
+            if !CGRequestListenEventAccess(),
+               let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+                NSWorkspace.shared.open(url)
+            }
+            return
+        }
+        settings.showKeys.toggle()
+        if settings.showKeys, !CGPreflightListenEventAccess() { CGRequestListenEventAccess() }
+        Log.info("Show keys in recordings: \(settings.showKeys ? "on" : "off")")
+    }
+
+    /// While recording, the menu bar icon is a stop button with the time beside it.
+    private func showRecordingStatus(_ on: Bool) {
+        guard let item = statusItem, let button = item.button else { return }
+        if on {
+            item.menu = nil
+            item.length = NSStatusItem.variableLength
+            button.image = symbol("stop.circle.fill", "stop.fill", description: "Stop recording")
+            button.image?.isTemplate = false
+            button.contentTintColor = .systemRed
+            button.imagePosition = .imageLeading
+            button.title = " 0:00"
+            button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            button.toolTip = "Stop recording (⌘⇧4)"
+            button.target = self
+            button.action = #selector(stopFromStatusItem)
+        } else {
+            item.length = NSStatusItem.squareLength
+            button.title = ""
+            button.contentTintColor = nil
+            button.image = symbol("camera.viewfinder", "camera", description: "Snap It")
+            button.image?.isTemplate = true
+            button.imagePosition = .imageOnly
+            button.toolTip = "Snap It"
+            button.action = nil
+            item.menu = statusMenu
+        }
+    }
+
+    @objc private func stopFromStatusItem() { stopRecording(trigger: "menu bar") }
 
     @objc private func captureAreaFromMenu() {
         // Let the menu close first so it isn't in the frozen frame.
@@ -204,8 +292,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Capture
 
-    private func captureArea(trigger: String) {
-        guard !capturing else { return }
+    /// The hotkey again while the crosshair is up switches between screenshot and recording, and while recording it stops.
+    private func captureArea(trigger: String, mode: CaptureMode = .screenshot) {
+        if recording != nil {
+            stopRecording(trigger: trigger)
+            return
+        }
+        if let overlay {
+            overlay.toggleMode()
+            return
+        }
+        guard !capturing, !recordingBusy else { return }
         capturing = true
         let start = CACurrentMediaTime()
         rememberFrontmostApp()
@@ -213,7 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 let captures = try await capturer.captureAllDisplays()
                 let captured = Log.ms(since: start)
-                let overlay = OverlayController(captures: captures) { selection in
+                let overlay = OverlayController(captures: captures, mode: mode) { selection in
                     self.overlayFinished(selection, mouseUp: CACurrentMediaTime())
                 }
                 self.overlay = overlay
@@ -238,11 +335,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             handBackFocus()
             return
         }
+        if selection.mode == .record {
+            startRecording(selection)
+            return
+        }
         afterCapture(image: selection.image, scale: selection.capture.scale, screen: selection.capture.screen, start: mouseUp, label: "mouse-up")
     }
 
     private func captureFullScreen(trigger: String) {
-        guard !capturing else { return }
+        if recording != nil {
+            stopRecording(trigger: trigger)
+            return
+        }
+        guard !capturing, !recordingBusy else { return }
         capturing = true
         let start = CACurrentMediaTime()
         rememberFrontmostApp()
@@ -287,11 +392,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // MARK: Recording
+
+    private func startRecording(_ selection: OverlayController.Selection) {
+        recordingBusy = true
+        // Give the keyboard back to the app being recorded straight away.
+        if let previousApp, !previousApp.isTerminated { previousApp.activate() }
+        ensureSaveFolder()
+        let folder = RecordingNaming.uniqueFolder(in: settings.saveFolder, date: Date())
+        let start = CACurrentMediaTime()
+        Task {
+            do {
+                let session = try await RecordingSession.start(capture: selection.capture, localRect: selection.localRect, folder: folder,
+                                                               settings: settings, capturer: capturer) { [weak self] in
+                    self?.stopRecording(trigger: "Stop button")
+                }
+                session.onTick = { [weak self] elapsed in
+                    let seconds = Int(elapsed)
+                    self?.statusItem?.button?.title = String(format: " %d:%02d", seconds / 60, seconds % 60)
+                }
+                recording = session
+                recordingBusy = false
+                showRecordingStatus(true)
+                Log.info("Recording started \(Log.ms(since: start)) after mouse-up")
+            } catch {
+                recordingBusy = false
+                try? FileManager.default.removeItem(at: folder)
+                NSSound.beep()
+                handleCaptureError(error)
+            }
+        }
+    }
+
+    private func stopRecording(trigger: String) {
+        guard let session = recording else { return }
+        recording = nil
+        recordingBusy = true
+        showRecordingStatus(false)
+        let start = CACurrentMediaTime()
+        Log.info("Stopping the recording (\(trigger))")
+        rememberFrontmostApp()
+        Task {
+            defer { recordingBusy = false }
+            do {
+                let finished = try await session.stop()
+                Output.copyRecording(finished)
+                showVideoEditor(VideoEditorWindowController(recording: finished))
+                Log.info("Video editor visible \(Log.ms(since: start)) after stopping")
+                await RecordingNotes.write(for: finished)
+            } catch {
+                Log.info("Recording failed: \(error)")
+                NSSound.beep()
+            }
+        }
+    }
+
+    private func showVideoEditor(_ editor: VideoEditorWindowController) {
+        editor.onClose = { [weak self] closed in
+            guard let self else { return }
+            videoEditors.removeAll { $0 === closed }
+            if editors.isEmpty, videoEditors.isEmpty { handBackFocus() }
+        }
+        videoEditors.append(editor)
+        editor.present()
+    }
+
     private func showEditor(_ editor: EditorWindowController) {
         editor.onClose = { [weak self] closed in
             guard let self else { return }
             editors.removeAll { $0 === closed }
-            if editors.isEmpty { handBackFocus() }
+            if editors.isEmpty, videoEditors.isEmpty { handBackFocus() }
         }
         editors.append(editor)
         editor.present()
@@ -303,7 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// With nothing of ours left on screen, give focus back to the app you were in.
     private func handBackFocus() {
-        guard overlay == nil, editors.isEmpty else { return }
+        guard overlay == nil, editors.isEmpty, videoEditors.isEmpty else { return }
         if let previousApp, !previousApp.isTerminated, previousApp != NSRunningApplication.current {
             previousApp.activate()
         } else {

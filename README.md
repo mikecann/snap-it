@@ -56,7 +56,7 @@ Every capture plays the screenshot sound, saves a PNG like `Screenshot 2026-10-2
 
 You can also open an existing image in the editor with `open -a "Snap It" some.png`, by dropping it on the app icon, or with Finder's Open With. A PNG gets saved over in place, anything else (JPEG, HEIC, WebP, TIFF) saves as a PNG next to it so the original is left alone.
 
-For Raycast or scripts, `open snapit://capture-area` and `open snapit://capture-fullscreen` do the same as ⌘⇧4 and ⌘⇧3.
+For Raycast or scripts, `open snapit://capture-area` and `open snapit://capture-fullscreen` do the same as ⌘⇧4 and ⌘⇧3. `open snapit://record-area` starts a recording and `open snapit://stop-recording` stops it.
 
 In the editor:
 
@@ -77,9 +77,29 @@ Click on anything you've drawn to select it, then drag it around, drag its handl
 
 **Done** (Return or ⌘Return) saves over the PNG, copies it and closes. **Copy** (⌘C) and **Save** (⌘S) keep the window open. The little picture button can be dragged straight into Claude, Slack or Finder. If you close the window with ⌘W or Escape after drawing something, or quit the app, it saves and copies anyway, so you never lose an arrow. If the save fails (disk full, folder gone) the image goes on the clipboard and the window stays open.
 
+## Recording a bit of the screen
+
+Sometimes a screenshot isn't enough, like when I want to show an agent something that only goes wrong once you click through it. So press **⌘⇧4 twice** (or press it once and click **Record** in the switch at the top of the screen), then drag out an area. A click without dragging records the whole display.
+
+![The Screenshot / Record switch at the top of the screen](docs/record-switch.png)
+
+While it records there's a red dashed outline around the area and a little Stop panel beside it, and the menu bar icon turns into a stop button with a timer. Press ⌘⇧4 again, click Stop or click the menu bar icon to finish. The outline and the panel don't end up in the video.
+
+Clicks show up as pink ripples (blue for a right-click) and the keys you press show along the bottom of the area, so whoever watches can see what you did. Both are on by default and you can turn them off from the menu bar menu. Showing keys needs **Input Monitoring** permission: macOS asks the first time you record, and it works from the next recording after you turn it on. Password fields hide their keys from it, so passwords don't end up in the video.
+
+![A recording in progress, with the keys shown along the bottom](docs/recording.png)
+
+When you stop, it saves a folder in `~/Screenshots` with the video in it, plus a `frames` folder of stills (the start, just after each click or key, and the end) and a `summary.md` that lists what you clicked and typed with the frames in between. That's because most agents can't watch a video, but they can read a markdown file and look at pictures. The clipboard gets the video as a file plus a couple of lines saying where the video and the summary are, so pasting into Finder gives you the video and pasting into an agent gives it the paths.
+
+Then an editor opens and plays the video on a loop. **Trim** (⌘T) brings up QuickTime-style handles, and trimming redoes the frames and summary to match. **Done** (Return) copies it again and closes, and the tile next to Copy drags the video into other apps.
+
+![The video editor](docs/video-editor.png)
+
 ## Settings
 
 There's no settings window. It remembers your last tool, colour, thickness and text size. The default is a hot pink arrow at 7 pt, because that's what I use for everything.
+
+Clicks and keys in recordings are both on unless you untick them in the menu bar menu.
 
 To save somewhere else:
 
@@ -100,6 +120,8 @@ tail -f ~/Library/Logs/snap-it.log
 It says whether each hotkey registered, and how long each capture took.
 
 If nothing happens when you press ⌘⇧4, something else probably has the shortcut. Quit CleanShot X, check **System Settings > Keyboard > Keyboard Shortcuts > Screenshots**, then run `bash restart.sh`.
+
+If keys don't show in recordings, open the menu bar menu: it says **(needs Input Monitoring)** next to Show Keys when Snap It doesn't have the permission, and picking it takes you to the right page in System Settings. Turn on Snap It there and record again.
 
 If you get a black or empty capture, or the permission alert keeps coming back, remove Snap It from the Screen Recording list, add it again and reopen it.
 

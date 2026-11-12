@@ -9,15 +9,20 @@ final class OverlayController {
         let capture: DisplayCapture
         let image: CGImage
         let localRect: CGRect
+        let mode: CaptureMode
     }
+
+    /// Screenshot or record. The hotkey again, or the switch at the top of each display, flips it.
+    private(set) var mode: CaptureMode
 
     private var windows: [OverlayWindow] = []
     private var views: [OverlayView] = []
     private let completion: (Selection?) -> Void
     private var finished = false
 
-    init(captures: [DisplayCapture], completion: @escaping (Selection?) -> Void) {
+    init(captures: [DisplayCapture], mode: CaptureMode = .screenshot, completion: @escaping (Selection?) -> Void) {
         self.completion = completion
+        self.mode = mode
         for capture in captures {
             let window = OverlayWindow(contentRect: capture.screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             window.level = .screenSaver
@@ -28,7 +33,7 @@ final class OverlayController {
             window.isReleasedWhenClosed = false
             window.acceptsMouseMovedEvents = true
             window.animationBehavior = .none
-            let view = OverlayView(capture: capture, controller: self)
+            let view = OverlayView(capture: capture, controller: self, mode: mode)
             window.contentView = view
             window.setFrame(capture.screen.frame, display: false)
             windows.append(window)
@@ -55,13 +60,24 @@ final class OverlayController {
         NSCursor.crosshair.set()
     }
 
+    func toggleMode() {
+        setMode(mode.toggled)
+    }
+
+    func setMode(_ newMode: CaptureMode) {
+        guard !finished, newMode != mode else { return }
+        mode = newMode
+        for view in views { view.setMode(newMode) }
+        Log.info("Crosshair switched to \(newMode == .record ? "recording" : "screenshot")")
+    }
+
     func finish(view: OverlayView, localRect: CGRect) {
         let pixelRect = view.capture.mapping.pixelRect(fromLocal: localRect)
         guard pixelRect.width >= 1, pixelRect.height >= 1, let cropped = view.capture.image.cropping(to: pixelRect) else {
             cancel()
             return
         }
-        close(with: Selection(capture: view.capture, image: cropped, localRect: localRect))
+        close(with: Selection(capture: view.capture, image: cropped, localRect: localRect, mode: mode))
     }
 
     func cancel() {
@@ -101,15 +117,23 @@ final class OverlayView: NSView {
     private let loupeLabel = CATextLayer()
     private var dragStart: CGPoint?
     private var selection: CGRect?
+    private var mode: CaptureMode
+    /// The Screenshot / Record switch at the top of the display.
+    private let modeSwitch = CALayer()
+    private let screenshotSegment = CALayer()
+    private let recordSegment = CALayer()
+    /// A press that landed on the switch, so its drag and release don't make a selection.
+    private var pressOnSwitch = false
 
     private static let loupePixels = 15
     private static let loupeCell: CGFloat = 8
     private static var loupeSize: CGFloat { CGFloat(loupePixels) * loupeCell }
     private static let labelHeight: CGFloat = 20
 
-    init(capture: DisplayCapture, controller: OverlayController) {
+    init(capture: DisplayCapture, controller: OverlayController, mode: CaptureMode) {
         self.capture = capture
         self.controller = controller
+        self.mode = mode
         super.init(frame: CGRect(origin: .zero, size: capture.screen.frame.size))
         layer = root
         wantsLayer = true
@@ -179,10 +203,64 @@ final class OverlayView: NSView {
         loupeLabel.frame = CGRect(x: 0, y: Self.loupeSize + 2, width: Self.loupeSize, height: Self.labelHeight - 2)
         for sub in [loupeImage, loupeGrid, loupeCenter, loupeLabel] { loupe.addSublayer(sub) }
 
-        for sub in [imageLayer, dimLayer, borderLayer, horizontalLine, verticalLine, sizeLabel, loupe] { root.addSublayer(sub) }
+        buildModeSwitch(scale: scale)
+        for sub in [imageLayer, dimLayer, borderLayer, horizontalLine, verticalLine, sizeLabel, loupe, modeSwitch] { root.addSublayer(sub) }
         horizontalLine.isHidden = true
         verticalLine.isHidden = true
         loupe.isHidden = true
+        applyMode()
+    }
+
+    // MARK: Screenshot / Record switch
+
+    private static let segmentSize = CGSize(width: 116, height: 30)
+
+    private func buildModeSwitch(scale: CGFloat) {
+        let size = Self.segmentSize
+        let screen = capture.screen
+        // Just under the menu bar (and the notch), centred.
+        let menuBar = max(screen.frame.maxY - screen.visibleFrame.maxY, screen.safeAreaInsets.top)
+        modeSwitch.frame = CGRect(x: (bounds.width - size.width * 2 - 8) / 2, y: menuBar + 14, width: size.width * 2 + 8, height: size.height + 8)
+        modeSwitch.backgroundColor = NSColor(white: 0.08, alpha: 0.85).cgColor
+        modeSwitch.cornerRadius = (size.height + 8) / 2
+        modeSwitch.borderWidth = 1
+        modeSwitch.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
+        let font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        for (i, (segment, title)) in [(screenshotSegment, "Screenshot"), (recordSegment, "● Record")].enumerated() {
+            segment.frame = CGRect(x: 4 + CGFloat(i) * size.width, y: 4, width: size.width, height: size.height)
+            segment.cornerRadius = size.height / 2
+            // Text layers draw from their top edge, so a layer one line tall, centred, centres the text.
+            let text = CATextLayer()
+            text.string = NSAttributedString(string: title, attributes: [.font: font, .foregroundColor: NSColor.white])
+            text.alignmentMode = .center
+            text.contentsScale = scale
+            let line = ceil(font.ascender - font.descender + font.leading)
+            text.frame = CGRect(x: 0, y: (size.height - line) / 2, width: size.width, height: line)
+            segment.addSublayer(text)
+            modeSwitch.addSublayer(segment)
+        }
+    }
+
+    func setMode(_ newMode: CaptureMode) {
+        mode = newMode
+        applyMode()
+    }
+
+    private func applyMode() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let recording = mode == .record
+        screenshotSegment.backgroundColor = recording ? nil : NSColor.white.withAlphaComponent(0.22).cgColor
+        recordSegment.backgroundColor = recording ? NSColor.systemRed.withAlphaComponent(0.85).cgColor : nil
+        borderLayer.strokeColor = (recording ? NSColor.systemRed : NSColor.white.withAlphaComponent(0.9)).cgColor
+        borderLayer.lineWidth = recording ? 2 : 1
+        CATransaction.commit()
+    }
+
+    /// Which half of the switch a point is on, if any.
+    private func switchMode(at p: CGPoint) -> CaptureMode? {
+        guard !modeSwitch.isHidden, modeSwitch.frame.contains(p) else { return nil }
+        return p.x < modeSwitch.frame.midX ? .screenshot : .record
     }
 
     private func configure(label: CATextLayer, scale: CGFloat) {
@@ -272,6 +350,12 @@ final class OverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if let picked = switchMode(at: localPoint(event)) {
+            pressOnSwitch = true
+            controller?.setMode(picked)
+            return
+        }
+        modeSwitch.isHidden = true
         dragStart = SelectionMath.clamp(localPoint(event), to: bounds)
         selection = nil
         CATransaction.begin()
@@ -282,7 +366,7 @@ final class OverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let start = dragStart else { return }
+        guard !pressOnSwitch, let start = dragStart else { return }
         let current = localPoint(event)
         let rect = SelectionMath.rect(from: start, to: current, square: event.modifierFlags.contains(.shift), within: bounds)
         selection = rect
@@ -311,9 +395,17 @@ final class OverlayView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         defer { dragStart = nil }
-        // A plain click with no drag cancels.
+        if pressOnSwitch {
+            pressOnSwitch = false
+            return
+        }
+        // A plain click with no drag cancels a screenshot, and records the whole display.
         guard let rect = selection, rect.width >= 2, rect.height >= 2 else {
-            controller?.cancel()
+            if mode == .record, dragStart != nil {
+                controller?.finish(view: self, localRect: bounds)
+            } else {
+                controller?.cancel()
+            }
             return
         }
         controller?.finish(view: self, localRect: rect)

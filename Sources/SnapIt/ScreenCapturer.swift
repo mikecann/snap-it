@@ -139,6 +139,25 @@ final class ScreenCapturer {
         return Self.makeCapture(image: image, screen: screen)
     }
 
+    /// A filter for recording `screen` that leaves out windows we've only just put up (the recording outline and
+    /// Stop panel), as well as Finder's desktop icons like screenshots do. The general window list doesn't include
+    /// windows from the asking app (seen on macOS 26), so ours come from the current-process list.
+    func recordingFilter(for screen: NSScreen, excludingWindowNumbers numbers: [Int]) async throws -> SCContentFilter {
+        let content = try await fetch()
+        guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else { throw CaptureError.noDisplay }
+        var ours = content.windows.filter { numbers.contains(Int($0.windowID)) }
+        for attempt in 0..<3 where ours.count < numbers.count {
+            if attempt > 0 { try? await Task.sleep(for: .milliseconds(60)) }
+            if #available(macOS 14.4, *), let mine = try? await SCShareableContent.currentProcess {
+                ours = mine.windows.filter { numbers.contains(Int($0.windowID)) }
+            }
+        }
+        if ours.count < numbers.count {
+            Log.info("Only found \(ours.count) of \(numbers.count) recording windows to leave out; they may show in a full-screen recording")
+        }
+        return SCContentFilter(display: display, excludingWindows: excludedWindows(in: content) + ours)
+    }
+
     private nonisolated static func configuration(for filter: SCContentFilter, screen: NSScreen) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
         let scale = CGFloat(filter.pointPixelScale)
